@@ -6,8 +6,14 @@ public class TickBehaviour : MonoBehaviour
     #region Advanced Features
     protected virtual void Wake() { }
     protected virtual void Init() { }
-    protected virtual void On() => TickManager.SubscribeTick(this);
-    protected virtual void Off() => TickManager.UnsubscribeTick(this);
+    protected virtual void On()
+    {
+        if(TickManager.Instance != null) TickManager.SubscribeTick(this);
+    }
+    protected virtual void Off()
+    {
+        if(TickManager.Instance !=null) TickManager.UnsubscribeTick(this);
+    }
     protected virtual void Die() { }
     #endregion
 
