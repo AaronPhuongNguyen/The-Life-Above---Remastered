@@ -1,15 +1,18 @@
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 public static class Calculation
 {
     #region Motion
-    public static Vector2 CalculateMovement(float speed, Vector2 dir, float deltaTime, bool isActive=true)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector2 CalculateMovement(float speed, Vector2 dir, float deltaTime, bool isActive = true)
     {
-        if(!isActive) return Vector2.zero; //simply prevent moving when gameStop and forget turning off unit
+        if (!isActive) return Vector2.zero; //simply prevent moving when gameStop and forget turning off unit
         float step = speed * deltaTime;
-        Vector2 delta = dir * step;
-        return delta;
+        return new Vector2(dir.x * step, dir.y * step);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector3 CalculateRotation(Vector2 dir, float offset = 90, float rotateRatio = 1, bool isActive = true)
     {
         if (!isActive) return Vector3.zero;
@@ -19,7 +22,9 @@ public static class Calculation
     #endregion
 
     #region Combat
+    // (base + flat + base * perc) * total
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static double AttributeFinalValue(double _base, double _flatBonus, double _percBonus, double _totalBonus)
-        => (_base + _flatBonus + (_base * _percBonus) ) * _totalBonus;
+        => (_base + _flatBonus + (_base * _percBonus)) * _totalBonus;
     #endregion
 }
