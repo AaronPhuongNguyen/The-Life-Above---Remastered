@@ -93,9 +93,15 @@ public static class Attack
     public static bool Apply(UnitAttribute attacker, UnitAttribute victim, float damage)
         => Apply(attacker, victim, damage, out _);
 
-    /// <summary>Damage = attacker.ATK * multiplier.</summary>
-    public static bool ApplyScaled(UnitAttribute attacker, UnitAttribute victim, float atkMultiplier = 1f)
-        => attacker != null && Apply(attacker, victim, attacker.ATK * atkMultiplier, out _);
+    /// <summary>Direct hit on a collider (resolved through UnitRegistry).</summary>
+    public static bool Apply(UnitAttribute attacker, Collider2D victimCollider, float damage, out DamageResult result)
+    {
+        result = default;
+        return victimCollider != null && UnitRegistry.TryGet(victimCollider, out UnitAttribute v) && Apply(attacker, v, damage, out result);
+    }
+
+    public static bool Apply(UnitAttribute attacker, Collider2D victimCollider, float damage)
+        => Apply(attacker, victimCollider, damage, out _);
 
     static bool TryHit(Collider2D col, UnitAttribute attacker, float damage, int id, List<DamageResult> results)
     {
@@ -137,7 +143,7 @@ public static class Attack
     #endregion
 
     #region Single (first target on a line)
-    /// <summary>Raycast, damages the first valid unit. Use width > 0 for a thick line (circle cast).</summary>
+    /// <summary>Raycast, damages the first valid unit. width > 0 = thick line (circle cast).</summary>
     public static bool Single(Vector2 origin, Vector2 dir, float range, float damage, UnitAttribute attacker,
                               LayerMask mask, out DamageResult result, float width = 0f)
     {
@@ -159,8 +165,51 @@ public static class Attack
         return false;
     }
 
-    public static bool Single(Vector2 origin, Vector2 dir, float range, UnitAttribute attacker, LayerMask mask, float width = 0f)
-        => Single(origin, dir, range, attacker.ATK, attacker, mask, out _, width);
+    public static bool Single(Vector2 origin, Vector2 dir, float range, float damage, UnitAttribute attacker,
+                              LayerMask mask, float width = 0f)
+        => Single(origin, dir, range, damage, attacker, mask, out _, width);
+
+    /// <summary>From point A to point B.</summary>
+    public static bool Single(Vector2 start, Vector2 end, float damage, UnitAttribute attacker,
+                              LayerMask mask, out DamageResult result, float width = 0f)
+    {
+        Vector2 d = end - start;
+        return Single(start, d, d.magnitude, damage, attacker, mask, out result, width);
+    }
+
+    public static bool Single(Vector2 start, Vector2 end, float damage, UnitAttribute attacker, LayerMask mask, float width = 0f)
+        => Single(start, end, damage, attacker, mask, out _, width);
+
+    /// <summary>Fires along transform.up (matches Calculation.CalculateRotation's 90 degree offset).</summary>
+    public static bool Single(Transform from, float range, float damage, UnitAttribute attacker,
+                              LayerMask mask, out DamageResult result, float width = 0f)
+        => Single(from.position, from.up, range, damage, attacker, mask, out result, width);
+
+    public static bool Single(Transform from, float range, float damage, UnitAttribute attacker, LayerMask mask, float width = 0f)
+        => Single(from.position, from.up, range, damage, attacker, mask, out _, width);
+
+    /// <summary>Damages the closest valid unit inside a radius (auto-target, melee swing without direction).</summary>
+    public static bool Nearest(Vector2 center, float radius, float damage, UnitAttribute attacker,
+                               LayerMask mask, out DamageResult result)
+    {
+        result = default;
+        if (attacker == null || damage <= 0f || radius <= 0f) return false;
+
+        int n = Physics2D.OverlapCircle(center, radius, Filter(mask), colBuf);
+        UnitAttribute best = null;
+        float bestSqr = float.MaxValue;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (!UnitRegistry.TryGet(colBuf[i], out UnitAttribute v) || v == attacker || !v.IsAlive) continue;
+            float sqr = ((Vector2)colBuf[i].ClosestPoint(center) - center).sqrMagnitude;
+            if (sqr < bestSqr) { bestSqr = sqr; best = v; }
+        }
+        return best != null && Apply(attacker, best, damage, out result);
+    }
+
+    public static bool Nearest(Vector2 center, float radius, float damage, UnitAttribute attacker, LayerMask mask)
+        => Nearest(center, radius, damage, attacker, mask, out _);
     #endregion
 
     #region Pierce (line through several targets)
@@ -182,12 +231,22 @@ public static class Attack
         return ProcessRayHits(n, damage, attacker, maxTargets, falloffPerHit, results);
     }
 
-    public static int Pierce(Vector2 origin, Vector2 dir, float range, UnitAttribute attacker, LayerMask mask,
+    /// <summary>From point A to point B.</summary>
+    public static int Pierce(Vector2 start, Vector2 end, float damage, UnitAttribute attacker, LayerMask mask,
                              int maxTargets = int.MaxValue, float falloffPerHit = 0f, float width = 0f,
                              List<DamageResult> results = null)
-        => Pierce(origin, dir, range, attacker.ATK, attacker, mask, maxTargets, falloffPerHit, width, results);
+    {
+        Vector2 d = end - start;
+        return Pierce(start, d, d.magnitude, damage, attacker, mask, maxTargets, falloffPerHit, width, results);
+    }
 
-    /// <summary>Rectangular sweep (laser, sword wave, charge). Boxes are sorted by distance along dir.</summary>
+    /// <summary>Along transform.up.</summary>
+    public static int Pierce(Transform from, float range, float damage, UnitAttribute attacker, LayerMask mask,
+                             int maxTargets = int.MaxValue, float falloffPerHit = 0f, float width = 0f,
+                             List<DamageResult> results = null)
+        => Pierce(from.position, from.up, range, damage, attacker, mask, maxTargets, falloffPerHit, width, results);
+
+    /// <summary>Rectangular sweep (laser, sword wave, charge). Hits are sorted by distance along dir.</summary>
     public static int PierceBox(Vector2 origin, Vector2 dir, float range, Vector2 size, float damage, UnitAttribute attacker,
                                 LayerMask mask, int maxTargets = int.MaxValue, float falloffPerHit = 0f,
                                 List<DamageResult> results = null)
@@ -198,6 +257,12 @@ public static class Attack
         int n = Physics2D.BoxCast(origin, size, angle, dir, Filter(mask), rayBuf, range);
         return ProcessRayHits(n, damage, attacker, maxTargets, falloffPerHit, results);
     }
+
+    /// <summary>Box sweep along transform.up; size.x = width, size.y = box length at the start.</summary>
+    public static int PierceBox(Transform from, float range, Vector2 size, float damage, UnitAttribute attacker,
+                                LayerMask mask, int maxTargets = int.MaxValue, float falloffPerHit = 0f,
+                                List<DamageResult> results = null)
+        => PierceBox(from.position, from.up, range, size, damage, attacker, mask, maxTargets, falloffPerHit, results);
     #endregion
 
     #region AoE (circle)
@@ -224,9 +289,28 @@ public static class Attack
         return hits;
     }
 
-    public static int Circle(Vector2 center, float radius, UnitAttribute attacker, LayerMask mask,
+    public static int Circle(Transform center, float radius, float damage, UnitAttribute attacker, LayerMask mask,
                              float minDamagePerc = 1f, int maxTargets = int.MaxValue, List<DamageResult> results = null)
-        => Circle(center, radius, attacker.ATK, attacker, mask, minDamagePerc, maxTargets, results);
+        => Circle((Vector2)center.position, radius, damage, attacker, mask, minDamagePerc, maxTargets, results);
+
+    /// <summary>Hollow ring (shockwave): only units between innerRadius and outerRadius.</summary>
+    public static int Ring(Vector2 center, float innerRadius, float outerRadius, float damage, UnitAttribute attacker,
+                           LayerMask mask, int maxTargets = int.MaxValue, List<DamageResult> results = null)
+    {
+        if (attacker == null || damage <= 0f || outerRadius <= innerRadius) return 0;
+
+        int n = Physics2D.OverlapCircle(center, outerRadius, Filter(mask), colBuf);
+        int id = NextStamp();
+        float sqrIn = innerRadius * innerRadius;
+        int hits = 0;
+
+        for (int i = 0; i < n && hits < maxTargets; i++)
+        {
+            if (((Vector2)colBuf[i].ClosestPoint(center) - center).sqrMagnitude < sqrIn) continue;
+            if (TryHit(colBuf[i], attacker, damage, id, results)) hits++;
+        }
+        return hits;
+    }
     #endregion
 
     #region AoE (box)
@@ -243,32 +327,58 @@ public static class Attack
             if (TryHit(colBuf[i], attacker, damage, id, results)) hits++;
         return hits;
     }
+
+    /// <summary>Axis-aligned box.</summary>
+    public static int Box(Vector2 center, Vector2 size, float damage, UnitAttribute attacker, LayerMask mask,
+                          int maxTargets = int.MaxValue, List<DamageResult> results = null)
+        => Box(center, size, 0f, damage, attacker, mask, maxTargets, results);
+
+    /// <summary>Box at transform position and rotation.</summary>
+    public static int Box(Transform at, Vector2 size, float damage, UnitAttribute attacker, LayerMask mask,
+                          int maxTargets = int.MaxValue, List<DamageResult> results = null)
+        => Box((Vector2)at.position, size, at.eulerAngles.z, damage, attacker, mask, maxTargets, results);
+
+    /// <summary>Box defined by a world Rect.</summary>
+    public static int Box(Rect area, float damage, UnitAttribute attacker, LayerMask mask,
+                          int maxTargets = int.MaxValue, List<DamageResult> results = null)
+        => Box(area.center, area.size, 0f, damage, attacker, mask, maxTargets, results);
     #endregion
 
     #region AoE (cone / arc)
     /// <param name="halfAngle">Degrees from dir to each side (45 = 90 degree cone).</param>
+    /// <param name="minDamagePerc">Damage at max range (1 = no falloff).</param>
     public static int Cone(Vector2 origin, Vector2 dir, float range, float halfAngle, float damage, UnitAttribute attacker,
-                           LayerMask mask, int maxTargets = int.MaxValue, List<DamageResult> results = null)
+                           LayerMask mask, float minDamagePerc = 1f, int maxTargets = int.MaxValue,
+                           List<DamageResult> results = null)
     {
         if (attacker == null || damage <= 0f || range <= 0f || !Normalize(ref dir)) return 0;
 
         int n = Physics2D.OverlapCircle(origin, range, Filter(mask), colBuf);
         int id = NextStamp();
         float cos = Mathf.Cos(halfAngle * Mathf.Deg2Rad);
+        float sqrR = range * range;
         int hits = 0;
 
         for (int i = 0; i < n && hits < maxTargets; i++)
         {
             Collider2D c = colBuf[i];
             Vector2 to = (Vector2)c.ClosestPoint(origin) - origin;
-            float mag = to.magnitude;
+            float sqr = to.sqrMagnitude;
+            float mag = Mathf.Sqrt(sqr);
 
             // inside/touching origin counts as hit, otherwise compare angle via dot product (no Acos)
             if (mag > 1e-4f && Vector2.Dot(dir, to) < cos * mag) continue;
 
-            if (TryHit(c, attacker, damage, id, results)) hits++;
+            float mult = minDamagePerc < 1f ? Calculation.Falloff(sqr, sqrR, minDamagePerc) : 1f;
+            if (TryHit(c, attacker, damage * mult, id, results)) hits++;
         }
         return hits;
     }
+
+    /// <summary>Cone along transform.up.</summary>
+    public static int Cone(Transform from, float range, float halfAngle, float damage, UnitAttribute attacker,
+                           LayerMask mask, float minDamagePerc = 1f, int maxTargets = int.MaxValue,
+                           List<DamageResult> results = null)
+        => Cone((Vector2)from.position, from.up, range, halfAngle, damage, attacker, mask, minDamagePerc, maxTargets, results);
     #endregion
 }
