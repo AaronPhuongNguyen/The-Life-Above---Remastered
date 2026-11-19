@@ -1,17 +1,52 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public readonly struct DamageResult
+public delegate void DamageHandler(ref DamageResult result);
+public delegate void HealHandler(ref HealResult result);
+
+public struct DamageResult
 {
-    public readonly float Damage;
+    // (Base + Flat) * Total * Mitigation
+    public float Damage => (Base + Bonus_Flat) * Bonus_Total * Mitigation;
+    public float Base;
+    public float Bonus_Flat;
+    public float Bonus_Total;      // multiply into it (*=) so handlers stay order-independent
+    public float Mitigation;       // defense multiplier, set by Calculation
+
     public readonly UnitAttribute Attacker;
     public readonly UnitAttribute Victim;
 
-    public DamageResult(float damage, UnitAttribute a, UnitAttribute v)
+    public DamageResult(float damage, UnitAttribute a, UnitAttribute v,
+                        float flatBonus = 0f, float totalBonus = 1f, float mitigation = 1f)
     {
-        Damage = damage;
+        Base = damage;
+        Bonus_Flat = flatBonus;
+        Bonus_Total = totalBonus;
+        Mitigation = mitigation;
         Attacker = a;
         Victim = v;
+    }
+}
+
+public struct HealResult
+{
+    public float Amount => (Base + Bonus_Flat) * Bonus_Total;
+    public float Base;
+    public float Bonus_Flat;
+    public float Bonus_Total;
+
+    public readonly UnitAttribute Source;
+    public readonly UnitAttribute Target;
+
+    public HealResult(float amount, UnitAttribute source, UnitAttribute target,
+                      float flatBonus = 0f, float totalBonus = 1f)
+    {
+        Base = amount;
+        Bonus_Flat = flatBonus;
+        Bonus_Total = totalBonus;
+        Source = source;
+        Target = target;
     }
 }
 
@@ -21,7 +56,7 @@ public readonly struct DamageResult
 /// </summary>
 public static class UnitRegistry
 {
-    static readonly Dictionary<int, UnitAttribute> map = new Dictionary<int, UnitAttribute>(512);
+    static readonly Dictionary<int, UnitAttribute> map = new Dictionary<int, UnitAttribute>(2048);
 
     public static void Register(Collider2D col, UnitAttribute attr) { if (col) map[col.GetInstanceID()] = attr; }
     public static void Unregister(Collider2D col) { if (col) map.Remove(col.GetInstanceID()); }
@@ -84,11 +119,34 @@ public static class Attack
         result = Calculation.CalculateDamage(damage, attacker, victim);
         if (result.Damage <= 0f) return false;
 
-        victim.TakeDamage(result.Damage);            // fires OnDeath if lethal
-        victim.OnTakeDamage?.Invoke(result);
-        attacker.OnDealDamage?.Invoke(result);
+        attacker.OnDealDamage?.Invoke(ref result);    // attacker side: crit, lifesteal, berserk...
+        if (result.Damage <= 0f) return false;
+
+        victim.OnTakeDamage?.Invoke(ref result);      // victim side: shield, cap, invulnerability...
+        if (result.Damage <= 0f) return false;        // fully absorbed
+
+        victim.TakeDamage(result.Damage);             // fires OnDeath if lethal
+        victim.OnDamaged?.Invoke(result);
         return true;
     }
+
+    /// <summary>Heal through the same pipeline: calculate, OnTakeHeal(ref), apply. Returns HP actually restored.</summary>
+    public static float Heal(UnitAttribute source, UnitAttribute target, float amount, out HealResult result)
+    {
+        result = default;
+        if (target == null || !target.IsAlive) return 0f;
+
+        result = Calculation.CalculateHeal(amount, source, target);
+        if (result.Amount <= 0f) return 0f;
+
+        target.OnTakeHeal?.Invoke(ref result);
+        if (result.Amount <= 0f) return 0f;
+
+        return target.TakeHeal(result.Amount);
+    }
+
+    public static float Heal(UnitAttribute source, UnitAttribute target, float amount)
+        => Heal(source, target, amount, out _);
 
     public static bool Apply(UnitAttribute attacker, UnitAttribute victim, float damage)
         => Apply(attacker, victim, damage, out _);
@@ -253,7 +311,7 @@ public static class Attack
     {
         if (attacker == null || damage <= 0f || !Normalize(ref dir)) return 0;
 
-        float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+        float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f;   // size.x = width, size.y = length along dir
         int n = Physics2D.BoxCast(origin, size, angle, dir, Filter(mask), rayBuf, range);
         return ProcessRayHits(n, damage, attacker, maxTargets, falloffPerHit, results);
     }

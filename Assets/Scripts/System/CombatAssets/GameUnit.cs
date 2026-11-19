@@ -24,22 +24,39 @@ public class GameUnit : TickBehaviour, IUnit
     //cache
     private Transform cachedTransform;
     private Vector2 lastFacingDir;
+    private Collider2D[] cols;          // NEW
     #endregion
 
     #region Initialize Unit
     protected override void Wake()
     {
-        cachedTransform = transform; //avoid the extern transform lookup every frame
+        cachedTransform = transform;
+        cols = GetComponentsInChildren<Collider2D>(true);   // NEW (true = include inactive children)
         if (Attribute == null) Attribute = new UnitAttribute();
     }
 
     protected override void On()
     {
         base.On();
+        RegisterColliders();
     }
+
     protected override void Off()
     {
         base.Off();
+        UnregisterColliders();
+    }
+
+    void RegisterColliders()
+    {
+        if (cols == null) return;
+        for (int i = 0; i < cols.Length; i++) UnitRegistry.Register(cols[i], Attribute);
+    }
+
+    void UnregisterColliders()
+    {
+        if (cols == null) return;
+        for (int i = 0; i < cols.Length; i++) UnitRegistry.Unregister(cols[i]);
     }
 
     public virtual void InitializeUnit(UnitAttribute attribute) //spawner this try to call this to summon, not automatically
@@ -54,6 +71,7 @@ public class GameUnit : TickBehaviour, IUnit
         lastFacingDir = Vector2.zero;
         isMoving = false;
         canMove = true;
+        Attribute.RefreshCombat();      // NEW: full HP on (re)spawn
     }
     #endregion
 

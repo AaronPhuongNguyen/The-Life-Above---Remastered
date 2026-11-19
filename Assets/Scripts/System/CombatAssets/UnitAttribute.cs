@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 public enum AttributeType : byte
@@ -55,14 +56,19 @@ public class UnitAttribute
     public float AttackRange => Final(BaseAttackRange, Ampl_AttackRange);
     public float AttackSpeed => Final(BaseAttackSpeed, Ampl_AttackSpeed);
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float Final(float baseValue, AttributeAmplifier a)
         => Mathf.Max(0f, Calculation.AttributeFinalValue(baseValue, a.FlatBonus, a.PercBonus, a.TotalBonus));
     #endregion
 
     #region Generic Access (data-driven buffs, UI, etc.)
-    public Action<DamageResult> OnTakeDamage, OnDealDamage;
-    public Action<float> OnHeal;
+    // pre-events: ref, listeners may modify the result
+    public DamageHandler OnTakeDamage, OnDealDamage;
+    public HealHandler OnTakeHeal;
+
+    // post-events: read only
+    public Action<DamageResult> OnDamaged;   // after HP was subtracted (also fires on lethal hit, after OnDeath)
+    public Action<float> OnHeal;             // actual HP restored (after clamping to max)
     public Action OnDeath;
 
     public float Get(AttributeType type) => type switch
@@ -202,12 +208,16 @@ public class UnitAttribute
         }
     }
 
-    public void TakeHeal(float value)
+    public float TakeHeal(float value)
     {
-        if (value <= 0f || !IsAlive) return;
+        if (value <= 0f || !IsAlive) return 0f;
 
-        HP_Current = Mathf.Min(HP_Current + value, HP_Max);
-        OnHeal?.Invoke(value);
+        float before = HP_Current;
+        HP_Current = Mathf.Min(before + value, HP_Max);
+        float healed = HP_Current - before;
+
+        if (healed > 0f) OnHeal?.Invoke(healed);
+        return healed;
     }
     #endregion
 

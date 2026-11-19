@@ -31,13 +31,18 @@ public static class Calculation
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float DamageMultiplier(float defense) => 300f / (defense + 300f);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static DamageResult CalculateDamage(float originalDamage, UnitAttribute attacker, UnitAttribute victim)
     {
         if (originalDamage <= 0f || attacker == null || victim == null)
-            return new DamageResult(0f, null, null);
+            return default;                                   // Damage == 0
 
-        return new DamageResult(originalDamage * DamageMultiplier(victim.Defense), attacker, victim);
+        return new DamageResult(originalDamage, attacker, victim, mitigation: DamageMultiplier(victim.Defense));
+    }
+
+    public static HealResult CalculateHeal(float amount, UnitAttribute source, UnitAttribute target)
+    {
+        if (amount <= 0f || target == null) return default;
+        return new HealResult(amount, source ?? target, target);
     }
 
     /// <summary>Linear falloff by distance. 1 at center, minPerc at edge.</summary>
