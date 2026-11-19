@@ -12,8 +12,8 @@ public class PawnVisualization : TickBehaviour
     public SpriteRenderer Hair;
     public SpriteRenderer Head;
     public SpriteRenderer Body;
-    [Tooltip("Optional. Shows the equipped gun.")]
-    public SpriteRenderer Weapon;
+    [Tooltip("Optional. Owns the weapon root / renderer, rotation and sorting. This script only gives it the gun sprite.")]
+    public PawnWeapon Weapon;
 
     [Header("Look (index into the list of the pawn's gender, -1 = pick randomly on Activate)")]
     [SerializeField] private int hairIndex = -1;
@@ -65,6 +65,7 @@ public class PawnVisualization : TickBehaviour
         if (gunIndex < 0) data.GetRandomGun(out gunIndex);
 
         Refresh(true);
+        if (Weapon != null) Weapon.Activate(owner); // after Refresh so the gun sprite is already set
     }
 
     /// <summary>Pick a random hair / head / body of the pawn's gender (and a gun when includeGun).</summary>
@@ -90,7 +91,7 @@ public class PawnVisualization : TickBehaviour
 
     public void ShowWeapon(bool show)
     {
-        if (Weapon != null) Weapon.enabled = show;
+        if (Weapon != null) Weapon.Show(show);
     }
 
     /// <summary>
@@ -123,8 +124,7 @@ public class PawnVisualization : TickBehaviour
         if (Weapon != null)
         {
             var gun = data.GetGun(gunIndex);
-            Weapon.sprite = gun != null ? gun.sprite : null;
-            Weapon.flipX = face == FaceDirection.West;
+            Weapon.SetSprite(gun != null ? gun.sprite : null);
         }
     }
 
