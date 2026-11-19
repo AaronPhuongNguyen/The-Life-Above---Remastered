@@ -327,6 +327,7 @@ public sealed class TickManager : MonoBehaviour
     {
         if (!syncUnityTimeScale) return;
         Time.timeScale = paused ? 0f : DesignedGameSpeed;
+        Debug.Log($"Current Timescale: {Time.timeScale}");
     }
 
     // Only tick methods a type actually overrides are scheduled: a behaviour that

@@ -10,17 +10,13 @@ public class GameUnit : TickBehaviour, IUnit
     //information
     [Header("Information")]
     public FaceDirection FaceDirection;
+    [SerializeField] private Vector2 direction;     //use SetDirection() so it is normalized once instead of every frame
     [SerializeField] private bool active = false;
 
     //settings
-    [Header("Settings")]
-    [SerializeField] private bool faceMovement = true;
-    [SerializeField] private float rotationOffset = 90f;
 
     //can be accessed by other but need to hide for clean.
     [HideInInspector] public bool canMove = true, isMoving;
-    [HideInInspector] public Vector2 direction;     //use SetDirection() so it is normalized once instead of every frame
-
     //public properties 
     public bool Active => active; //change it through SetUnitActive / TurnUnitOn / TurnUnitOff so ticking stays in sync
     public FaceDirection Facing => FaceDirection; //read-only for others, change it through SetFaceDirection / SetDirection
@@ -39,8 +35,7 @@ public class GameUnit : TickBehaviour, IUnit
 
     protected override void On()
     {
-        // Inactive units are not subscribed at all, so they cost nothing in TickManager.
-        if (active) base.On();
+        base.On();
     }
     protected override void Off()
     {
@@ -63,7 +58,10 @@ public class GameUnit : TickBehaviour, IUnit
     #endregion
 
     #region Given Tick
-    protected override void Tick(float deltaTime) => MoveUnit(deltaTime);
+    protected override void Tick(float deltaTime)
+    {
+        MoveUnit(deltaTime);
+    }
     #endregion
 
     #region Universal Behaviours
@@ -75,7 +73,7 @@ public class GameUnit : TickBehaviour, IUnit
             return;
         }
 
-        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed, direction, deltaTime);
+        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed, direction, deltaTime,active);
         isMoving = delta.x != 0f || delta.y != 0f;
         if (!isMoving) return;
 
@@ -89,9 +87,6 @@ public class GameUnit : TickBehaviour, IUnit
         {
             lastFacingDir = direction;
             FaceDirection = ResolveFaceDirection(direction); //always kept up to date (animators / sprites read it)
-
-            if (faceMovement) //rotation is optional, FaceDirection is not
-                cachedTransform.rotation = Quaternion.Euler(Calculation.CalculateRotation(direction, rotationOffset));
         }
     }
 
@@ -121,9 +116,6 @@ public class GameUnit : TickBehaviour, IUnit
             default: dir = Vector2.left; break;
         }
         lastFacingDir = dir;
-
-        if (faceMovement && cachedTransform != null)
-            cachedTransform.rotation = Quaternion.Euler(Calculation.CalculateRotation(dir, rotationOffset));
     }
     #endregion
 

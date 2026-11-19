@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using UnityEngine;
 
 public enum AttributeType : byte
@@ -10,17 +9,29 @@ public enum AttributeType : byte
 [Serializable]
 public class UnitAttribute
 {
-    //Status: HP, ATK, Defense, Speed, Sight, AttackRange, AttackSpeed.
+    #region Runtime
+    public float HP_Current;
+    public float HP_Lost_Flat => HP_Max - HP_Current;
+    /// <summary>Fraction of HP already lost (0 = full health, 1 = dead).</summary>
+    public float HP_Lost_Perc => HP_Max > 0f ? 1f - HP_Current / HP_Max : 1f;
+    /// <summary>Fraction of HP remaining (1 = full health). For health bars.</summary>
+    public float HP_Perc => HP_Max > 0f ? HP_Current / HP_Max : 0f;
+
+    public bool IsAlive => HP_Current > 0f;
+
+    /// <summary>Used by Attack to avoid hitting the same unit twice in one query (multi-collider units). Not serialized.</summary>
+    [NonSerialized] public int HitStamp;
+    #endregion
 
     #region Base (edit in Inspector)
     [Header("Base")]
-    public double BaseHP = 100;
-    public double BaseATK = 10;
-    public double BaseDefense = 0;
-    public double BaseSpeed = 3;
-    public double BaseSight = 5;
-    public double BaseAttackRange = 1;
-    public double BaseAttackSpeed = 1;
+    public float BaseHP = 100f;
+    public float BaseATK = 10f;
+    public float BaseDefense = 0f;
+    public float BaseSpeed = 3f;
+    public float BaseSight = 5f;
+    public float BaseAttackRange = 1f;
+    public float BaseAttackSpeed = 1f;
     #endregion
 
     #region Amplifiers
@@ -36,21 +47,25 @@ public class UnitAttribute
 
     #region Attributes
     //final values: (base + flat + base * perc) * total, never below 0
-    public double HP_Max => Final(BaseHP, Ampl_HP);
-    public double ATK => Final(BaseATK, Ampl_ATK);
-    public double Defense => Final(BaseDefense, Ampl_Defense);
-    public double Speed => Final(BaseSpeed, Ampl_Speed);
-    public double Sight => Final(BaseSight, Ampl_Sight);
-    public double AttackRange => Final(BaseAttackRange, Ampl_AttackRange);
-    public double AttackSpeed => Final(BaseAttackSpeed, Ampl_AttackSpeed);
+    public float HP_Max => Final(BaseHP, Ampl_HP);
+    public float ATK => Final(BaseATK, Ampl_ATK);
+    public float Defense => Final(BaseDefense, Ampl_Defense);
+    public float Speed => Final(BaseSpeed, Ampl_Speed);
+    public float Sight => Final(BaseSight, Ampl_Sight);
+    public float AttackRange => Final(BaseAttackRange, Ampl_AttackRange);
+    public float AttackSpeed => Final(BaseAttackSpeed, Ampl_AttackSpeed);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static double Final(double baseValue, AttributeAmplifier a)
-        => Math.Max(0d, Calculation.AttributeFinalValue(baseValue, a.FlatBonus, a.PercBonus, a.TotalBonus));
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static float Final(float baseValue, AttributeAmplifier a)
+        => Mathf.Max(0f, Calculation.AttributeFinalValue(baseValue, a.FlatBonus, a.PercBonus, a.TotalBonus));
     #endregion
 
     #region Generic Access (data-driven buffs, UI, etc.)
-    public double Get(AttributeType type) => type switch
+    public Action<DamageResult> OnTakeDamage, OnDealDamage;
+    public Action<float> OnHeal;
+    public Action OnDeath;
+
+    public float Get(AttributeType type) => type switch
     {
         AttributeType.HP => HP_Max,
         AttributeType.ATK => ATK,
@@ -74,7 +89,7 @@ public class UnitAttribute
         _ => throw new ArgumentOutOfRangeException(nameof(type))
     };
 
-    public double GetBase(AttributeType type) => type switch
+    public float GetBase(AttributeType type) => type switch
     {
         AttributeType.HP => BaseHP,
         AttributeType.ATK => BaseATK,
@@ -86,7 +101,7 @@ public class UnitAttribute
         _ => throw new ArgumentOutOfRangeException(nameof(type))
     };
 
-    public void SetBase(AttributeType type, double value)
+    public void SetBase(AttributeType type, float value)
     {
         switch (type)
         {
@@ -108,6 +123,7 @@ public class UnitAttribute
     {
         UnitAttribute clone = new UnitAttribute();
         clone.CopyFrom(this);
+        clone.RefreshCombat();
         return clone;
     }
 
@@ -148,13 +164,13 @@ public class UnitAttribute
     /// <summary>Sanitize values (called from OnValidate): no negative bases, no negative total multipliers.</summary>
     public void Refresh()
     {
-        BaseHP = Math.Max(0d, BaseHP);
-        BaseATK = Math.Max(0d, BaseATK);
-        BaseDefense = Math.Max(0d, BaseDefense);
-        BaseSpeed = Math.Max(0d, BaseSpeed);
-        BaseSight = Math.Max(0d, BaseSight);
-        BaseAttackRange = Math.Max(0d, BaseAttackRange);
-        BaseAttackSpeed = Math.Max(0d, BaseAttackSpeed);
+        BaseHP = Mathf.Max(0f, BaseHP);
+        BaseATK = Mathf.Max(0f, BaseATK);
+        BaseDefense = Mathf.Max(0f, BaseDefense);
+        BaseSpeed = Mathf.Max(0f, BaseSpeed);
+        BaseSight = Mathf.Max(0f, BaseSight);
+        BaseAttackRange = Mathf.Max(0f, BaseAttackRange);
+        BaseAttackSpeed = Mathf.Max(0f, BaseAttackSpeed);
 
         Ampl_HP.Sanitize();
         Ampl_ATK.Sanitize();
@@ -163,22 +179,53 @@ public class UnitAttribute
         Ampl_Sight.Sanitize();
         Ampl_AttackRange.Sanitize();
         Ampl_AttackSpeed.Sanitize();
+
+        RefreshCombat();
     }
+
+    #region Combat
+    public void RefreshCombat()
+    {
+        HP_Current = HP_Max;
+    }
+
+    public void TakeDamage(float value)
+    {
+        if (value <= 0f || !IsAlive) return;
+
+        HP_Current -= value;
+
+        if (!IsAlive)
+        {
+            HP_Current = 0f;
+            OnDeath?.Invoke();
+        }
+    }
+
+    public void TakeHeal(float value)
+    {
+        if (value <= 0f || !IsAlive) return;
+
+        HP_Current = Mathf.Min(HP_Current + value, HP_Max);
+        OnHeal?.Invoke(value);
+    }
+    #endregion
+
     #endregion
 }
 
 [Serializable]
 public class AttributeAmplifier
 {
-    public double FlatBonus;        // added to base:            +5
-    public double PercBonus;        // additive % of base:       0.25 = +25%   (identity = 0)
-    public double TotalBonus = 1;   // final multiplier:         1.5 = x1.5    (identity = 1)
+    public float FlatBonus;        // added to base:            +5
+    public float PercBonus;        // additive % of base:       0.25 = +25%   (identity = 0)
+    public float TotalBonus = 1f;  // final multiplier:         1.5 = x1.5    (identity = 1)
 
     public void Reset()
     {
-        FlatBonus = 0d;
-        PercBonus = 0d;
-        TotalBonus = 1d;
+        FlatBonus = 0f;
+        PercBonus = 0f;
+        TotalBonus = 1f;
     }
 
     public void CopyFrom(AttributeAmplifier s)
@@ -190,6 +237,6 @@ public class AttributeAmplifier
 
     public void Sanitize()
     {
-        if (TotalBonus < 0d) TotalBonus = 0d;
+        if (TotalBonus < 0f) TotalBonus = 0f;
     }
 }
