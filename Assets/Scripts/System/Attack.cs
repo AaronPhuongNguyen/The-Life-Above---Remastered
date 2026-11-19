@@ -51,39 +51,10 @@ public struct HealResult
 }
 
 /// <summary>
-/// Collider -> UnitAttribute lookup. Replaces GetComponent in hot paths (one dictionary hit on an int key, no allocation).
-/// Units register their colliders in OnEnable and unregister in OnDisable (see UnitBody below).
-/// </summary>
-public static class UnitRegistry
-{
-    static readonly Dictionary<int, UnitAttribute> map = new Dictionary<int, UnitAttribute>(2048);
-
-    public static void Register(Collider2D col, UnitAttribute attr) { if (col) map[col.GetInstanceID()] = attr; }
-    public static void Unregister(Collider2D col) { if (col) map.Remove(col.GetInstanceID()); }
-    public static bool TryGet(Collider2D col, out UnitAttribute attr) => map.TryGetValue(col.GetInstanceID(), out attr);
-
-    // static state survives play-mode entry when Domain Reload is disabled
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void Reset() => map.Clear();
-}
-
-/// <summary>Minimal example binding: put on a unit with one or more Collider2D.</summary>
-public class UnitBody : MonoBehaviour
-{
-    public UnitAttribute Attribute = new UnitAttribute();
-    Collider2D[] cols;
-
-    void Awake() => cols = GetComponentsInChildren<Collider2D>();
-    void OnEnable() { Attribute.RefreshCombat(); foreach (var c in cols) UnitRegistry.Register(c, Attribute); }
-    void OnDisable() { foreach (var c in cols) UnitRegistry.Unregister(c); }
-    void OnValidate() => Attribute.Refresh();
-}
-
-/// <summary>
 /// All damage queries. Designed for 100-300 calls/frame:
 ///  - zero GC: static NonAlloc buffers, no LINQ/closures, optional caller-owned result list
 ///  - LayerMask filtering done by physics (put each team on its own layer), not in C#
-///  - no GetComponent: UnitRegistry lookup
+///  - no GetComponent: GameUnit.TryGetAttribute lookup
 ///  - per-query stamp de-duplicates multi-collider units without a HashSet
 ///  - sqrMagnitude where possible
 /// </summary>
@@ -151,11 +122,11 @@ public static class Attack
     public static bool Apply(UnitAttribute attacker, UnitAttribute victim, float damage)
         => Apply(attacker, victim, damage, out _);
 
-    /// <summary>Direct hit on a collider (resolved through UnitRegistry).</summary>
+    /// <summary>Direct hit on a collider (resolved through GameUnit.TryGetAttribute).</summary>
     public static bool Apply(UnitAttribute attacker, Collider2D victimCollider, float damage, out DamageResult result)
     {
         result = default;
-        return victimCollider != null && UnitRegistry.TryGet(victimCollider, out UnitAttribute v) && Apply(attacker, v, damage, out result);
+        return victimCollider != null && GameUnit.TryGetAttribute(victimCollider, out UnitAttribute v) && Apply(attacker, v, damage, out result);
     }
 
     public static bool Apply(UnitAttribute attacker, Collider2D victimCollider, float damage)
@@ -163,7 +134,7 @@ public static class Attack
 
     static bool TryHit(Collider2D col, UnitAttribute attacker, float damage, int id, List<DamageResult> results)
     {
-        if (!UnitRegistry.TryGet(col, out UnitAttribute victim)) return false;
+        if (!GameUnit.TryGetAttribute(col, out UnitAttribute victim)) return false;
         if (victim == attacker || victim.HitStamp == id) return false;
         victim.HitStamp = id;
 
@@ -216,7 +187,7 @@ public static class Attack
         int id = NextStamp();
         for (int i = 0; i < n; i++)           // nearest first; skips self / non-units
         {
-            if (!UnitRegistry.TryGet(rayBuf[i].collider, out UnitAttribute v) || v == attacker) continue;
+            if (!GameUnit.TryGetAttribute(rayBuf[i].collider, out UnitAttribute v) || v == attacker) continue;
             v.HitStamp = id;
             return Apply(attacker, v, damage, out result);
         }
@@ -259,7 +230,7 @@ public static class Attack
 
         for (int i = 0; i < n; i++)
         {
-            if (!UnitRegistry.TryGet(colBuf[i], out UnitAttribute v) || v == attacker || !v.IsAlive) continue;
+            if (!GameUnit.TryGetAttribute(colBuf[i], out UnitAttribute v) || v == attacker || !v.IsAlive) continue;
             float sqr = ((Vector2)colBuf[i].ClosestPoint(center) - center).sqrMagnitude;
             if (sqr < bestSqr) { bestSqr = sqr; best = v; }
         }

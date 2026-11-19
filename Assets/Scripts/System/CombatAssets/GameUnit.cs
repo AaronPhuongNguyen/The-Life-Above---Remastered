@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class GameUnit : TickBehaviour, IUnit
@@ -38,6 +39,7 @@ public class GameUnit : TickBehaviour, IUnit
     protected override void On()
     {
         base.On();
+        Attribute.RefreshCombat();      // full HP when the unit is enabled (what UnitBody used to do)
         RegisterColliders();
     }
 
@@ -47,16 +49,32 @@ public class GameUnit : TickBehaviour, IUnit
         UnregisterColliders();
     }
 
+    // Collider -> UnitAttribute lookup used by Attack (one dictionary hit on an int key, no GetComponent, no allocation).
+    private static readonly Dictionary<int, UnitAttribute> colliderMap = new Dictionary<int, UnitAttribute>(2048);
+
+    /// <summary>Attribute of the unit owning this collider. False for non-units.</summary>
+    public static bool TryGetAttribute(Collider2D col, out UnitAttribute attr)
+    {
+        if (col == null) { attr = null; return false; }
+        return colliderMap.TryGetValue(col.GetInstanceID(), out attr);
+    }
+
+    // static state survives play-mode entry when Domain Reload is disabled
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetColliderMap() => colliderMap.Clear();
+
     void RegisterColliders()
     {
         if (cols == null) return;
-        for (int i = 0; i < cols.Length; i++) UnitRegistry.Register(cols[i], Attribute);
+        for (int i = 0; i < cols.Length; i++)
+            if (cols[i] != null) colliderMap[cols[i].GetInstanceID()] = Attribute;
     }
 
     void UnregisterColliders()
     {
         if (cols == null) return;
-        for (int i = 0; i < cols.Length; i++) UnitRegistry.Unregister(cols[i]);
+        for (int i = 0; i < cols.Length; i++)
+            if (cols[i] != null) colliderMap.Remove(cols[i].GetInstanceID());
     }
 
     public virtual void InitializeUnit(UnitAttribute attribute) //spawner this try to call this to summon, not automatically
@@ -91,7 +109,7 @@ public class GameUnit : TickBehaviour, IUnit
             return;
         }
 
-        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed, direction, deltaTime,active);
+        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed, direction, deltaTime, active);
         isMoving = delta.x != 0f || delta.y != 0f;
         if (!isMoving) return;
 

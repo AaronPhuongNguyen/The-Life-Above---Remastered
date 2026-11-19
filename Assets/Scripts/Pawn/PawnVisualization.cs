@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Pawn))]
 public class PawnVisualization : TickBehaviour
 {
     [Header("Properties")]
@@ -48,7 +49,7 @@ public class PawnVisualization : TickBehaviour
 
         if (data == null)
         {
-            GameDatabase loaded = Resources.Load<GameDatabase>(DatabaseName);
+            GameDatabase loaded = owner != null && owner.Database != null ? owner.Database : Resources.Load<GameDatabase>(DatabaseName);
             if (loaded == null)
             {
                 Debug.LogError($"[PawnVisualization] Database '{DatabaseName}' not found in a Resources folder.", this);

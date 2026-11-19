@@ -2,7 +2,6 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 
-[RequireComponent(typeof(UnitBody))]
 public class Pawn : GameUnit
 {
     #region Settings
@@ -35,6 +34,10 @@ public class Pawn : GameUnit
     [SerializeField] private Gender gender = Gender.Male;
     [Tooltip("Pick a random gender every time InitializeUnit is called (spawning).")]
     [SerializeField] private bool randomGenderOnInit = false;
+
+    [Header("Assets")]
+    public GameDatabase Database;
+    public PawnVisualization visualizer;
     #endregion
 
     #region State
@@ -98,6 +101,12 @@ public class Pawn : GameUnit
         if (gender == value) return;
         gender = value;
         OnGenderChanged?.Invoke(this);
+    }
+    private void OnValidate()
+    {
+        if (!gameObject.TryGetComponent<PawnVisualization>(out visualizer))
+            visualizer = gameObject.AddComponent<PawnVisualization>();
+        visualizer.Activate(this);
     }
     #endregion
 
