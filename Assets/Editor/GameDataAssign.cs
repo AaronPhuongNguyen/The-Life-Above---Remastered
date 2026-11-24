@@ -51,14 +51,53 @@ public static class PawnSpriteAssigner
 
     public static GameDatabase FindDatabase()
     {
+        // 1. remembered database
         string guid = EditorPrefs.GetString(PrefDb, "");
         if (!string.IsNullOrEmpty(guid))
         {
-            var db = AssetDatabase.LoadAssetAtPath<GameDatabase>(AssetDatabase.GUIDToAssetPath(guid));
-            if (db != null) return db;
+            var saved = AssetDatabase.LoadAssetAtPath<GameDatabase>(AssetDatabase.GUIDToAssetPath(guid));
+            if (saved != null) return saved;
         }
-        var guids = AssetDatabase.FindAssets("t:GameDatabase");
-        return guids.Length > 0 ? AssetDatabase.LoadAssetAtPath<GameDatabase>(AssetDatabase.GUIDToAssetPath(guids[0])) : null;
+
+        // 2. the runtime one in Resources
+        var res = Resources.Load<GameDatabase>(GameDatabase.ResourceName);
+        if (res != null) { RememberDatabase(res); return res; }
+
+        // 3. any asset of that type
+        foreach (var g in AssetDatabase.FindAssets("t:GameDatabase"))
+        {
+            var db = AssetDatabase.LoadAssetAtPath<GameDatabase>(AssetDatabase.GUIDToAssetPath(g));
+            if (db != null) { RememberDatabase(db); return db; }
+        }
+        return null;
+    }
+
+    /// <summary>Explains why no database was found (broken script link, wrong type...).</summary>
+    public static string Diagnose()
+    {
+        foreach (var g in AssetDatabase.FindAssets(GameDatabase.ResourceName))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(g);
+            if (AssetDatabase.LoadAssetAtPath<GameDatabase>(path) == null)
+                return $"Found '{path}' but it is not a GameDatabase. Its script link is probably broken: " +
+                       "the script file must be named GameDatabase.cs. Select the asset and check its Script field.";
+        }
+        return "No GameDatabase asset exists. Click 'Create database' or use Assets > Create > Database > General.";
+    }
+
+    public static GameDatabase CreateDatabase()
+    {
+        if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
+        string path = "Assets/Resources/" + GameDatabase.ResourceName + ".asset";
+        var existing = AssetDatabase.LoadAssetAtPath<GameDatabase>(path);
+        if (existing != null) return existing;
+
+        var db = ScriptableObject.CreateInstance<GameDatabase>();
+        db.EnsureDefaults();
+        AssetDatabase.CreateAsset(db, path);
+        AssetDatabase.SaveAssets();
+        RememberDatabase(db);
+        return db;
     }
     #endregion
 
@@ -137,7 +176,10 @@ public static class PawnSpriteAssigner
                 string baseName = StripDirection(s.name, out Dir dir, out bool hasDir);
                 if (!hasDir) report.warnings.Add($"'{s.name}' has no East/North/South suffix, used as East.");
 
-                string key = rel.Length == 0 ? baseName : rel + "/" + baseName;
+                string key = rel.Length == 0 ? baseName
+           : baseName.Length == 0 ? rel
+           : rel + "/" + baseName;
+                if (key.Length == 0) key = s.name;
                 if (!found.TryGetValue(key, out var look))
                 {
                     look = new LookDef { key = key, gender = GenderOf(rel) };
@@ -219,8 +261,7 @@ public static class PawnSpriteAssigner
             case "north": dir = Dir.North; break;
             case "south": dir = Dir.South; break;
         }
-        string baseName = name.Substring(0, m.Index);
-        return baseName.Length == 0 ? name : baseName;
+        return name.Substring(0, m.Index); // "" for files named East / North / South
     }
 
     /// <summary>First sub-folder named Male / Female decides the gender, anything else is Any.</summary>
@@ -299,6 +340,14 @@ public class PawnSpriteAssignerWindow : EditorWindow
         EditorGUILayout.Space();
         EditorGUI.BeginChangeCheck();
         db = (GameDatabase)EditorGUILayout.ObjectField("Database", db, typeof(GameDatabase), false);
+        if (db == null)
+        {
+            EditorGUILayout.HelpBox(PawnSpriteAssigner.Diagnose(), MessageType.Warning);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Find again")) db = PawnSpriteAssigner.FindDatabase();
+            if (GUILayout.Button("Create database")) db = PawnSpriteAssigner.CreateDatabase();
+            EditorGUILayout.EndHorizontal();
+        }
         if (EditorGUI.EndChangeCheck()) PawnSpriteAssigner.RememberDatabase(db);
 
         EditorGUILayout.BeginHorizontal();
