@@ -88,6 +88,7 @@ public static class Attack
         if (attacker == null || victim == null || !victim.IsAlive) return false;
 
         result = Calculation.CalculateDamage(damage, attacker, victim);
+        if (ArmourPenetration > 0f) result.Mitigation = Mathf.Lerp(result.Mitigation, 1f, ArmourPenetration);
         if (result.Damage <= 0f) return false;
 
         attacker.OnDealDamage?.Invoke(ref result);    // attacker side: crit, lifesteal, berserk...
@@ -169,6 +170,7 @@ public static class Attack
         }
         return hits;
     }
+    public static float ArmourPenetration;
     #endregion
 
     #region Single (first target on a line)

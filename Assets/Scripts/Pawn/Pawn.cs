@@ -1,74 +1,157 @@
 using System;
 using UnityEngine;
 
+/// <summary>Everything a save file needs for one pawn. Only ids and ammo, never references.</summary>
+[Serializable]
+public class PawnData
+{
+    public Gender gender = Gender.Male;
+    [Tooltip("-1 = pick a random one that fits the gender.")]
+    public int hairId = -1, headId = -1, bodyId = -1;
+    public int weaponId = GameDatabase.FistId;
+    [Tooltip("-1 = full magazine.")]
+    public int ammo = -1;
+
+    public int GetLook(LookSlot slot) => slot == LookSlot.Hair ? hairId : slot == LookSlot.Head ? headId : bodyId;
+
+    public void SetLook(LookSlot slot, int id)
+    {
+        if (slot == LookSlot.Hair) hairId = id;
+        else if (slot == LookSlot.Head) headId = id;
+        else bodyId = id;
+    }
+
+    public PawnData Clone() => (PawnData)MemberwiseClone();
+}
+
+/// <summary>
+/// Template for every unit (player, AI, summons). The single owner of unit data:
+/// PawnData (ids into GameDatabase), target layers and derived values.
+/// PawnVisualization and PawnWeapon only read from here.
+/// </summary>
+[RequireComponent(typeof(PawnVisualization))]
 public class Pawn : GameUnit
 {
     #region Settings
-    [Header("Identity")]
-    [SerializeField] private Gender gender = Gender.Male;
+    [Header("Data (ids into GameDatabase, this is what a save stores)")]
+    [SerializeField] private PawnData data = new PawnData();
     [Tooltip("Pick a random gender every time InitializeUnit is called (spawning).")]
     [SerializeField] private bool randomGenderOnInit = false;
 
-    [Header("Assets")]
-    public GameDatabase Database;
+    [Header("Combat")]
+    [Tooltip("Layers this pawn's weapon can damage. Put each team on its own layer.")]
+    public LayerMask targetMask = ~0;
+
+    [Header("Components")]
     public PawnVisualization visualizer;
     public PawnWeapon weapon;
 
-    [Header("Force Move")]
+    [Header("Movement")]
+    [Tooltip("Speed lost per weight unit carried (0.02 = 2% per kg).")]
+    [SerializeField, Min(0f)] private float weightSlowPerKg = 0.02f;
     [Tooltip("Apply the MapManager terrain speed to force moves (mud, water, floors).")]
     [SerializeField] private bool forceUsesTerrainSpeed = true;
     [SerializeField, Min(0.01f)] private float forceArriveDistance = 0.05f;
     #endregion
 
-    #region State
-    /// <summary>Male or Female. Change it with SetGender so listeners (visualization, UI) are notified.</summary>
-    public Gender Gender => gender;
+    #region Data
+    public GameDatabase Database => GameDatabase.Main;
 
-    public event Action<Pawn> OnGenderChanged;
+    public Gender Gender => data.gender;
+    public int HairId => data.hairId;
+    public int HeadId => data.headId;
+    public int BodyId => data.bodyId;
+    public int WeaponId => data.weaponId;
+    public int Ammo => data.ammo;
+    public LayerMask TargetMask => targetMask;
 
-    /// <summary>Raised when a force move ends (duration over, target reached, blocked or StopMove).</summary>
-    public event Action<Pawn> OnForceMoveEnded;
+    /// <summary>Equipped weapon definition (never null).</summary>
+    public WeaponDef Equipped => equipped ?? (equipped = Database.GetWeapon(data.weaponId));
+    /// <summary>Speed multiplier from the carried weight (1 = no slowdown).</summary>
+    public float WeightFactor => weightFactor;
 
-    public bool IsForceMoving => forceActive;
-    /// <summary>True while following a path OR force moving.</summary>
-    public bool HasMoveOrder => forceActive || IsFollowingPath;
+    /// <summary>Raised whenever gender, a look or the weapon changed (visuals and weapon listen to it).</summary>
+    public event Action<Pawn> OnDataChanged;
 
-    private bool forceActive;
-    private Vector2 forceDir;
-    private bool forceTimed;
-    private float forceTimeLeft;
-    private bool forceIgnoreBlocking;
-    private bool forceHasTarget;
-    private Vector2 forceTarget;
-    private Vector2Int forceCell;
-    private bool forceCellInit;
-    private float forceSpeedMul = 1f;
+    private WeaponDef equipped;
+    private float weightFactor = 1f;
+    #endregion
+
+    #region Data API
+    /// <summary>Copy of the save data.</summary>
+    public PawnData ExportData() => data.Clone();
+
+    /// <summary>Load from a save. Invalid ids are repaired (random look, Fist).</summary>
+    public void ImportData(PawnData saved)
+    {
+        if (saved == null) return;
+        data = saved.Clone();
+        Rebuild();
+    }
+
+    public void SetGender(Gender value)
+    {
+        if (data.gender == value) return;
+        data.gender = value;
+        Rebuild(); // looks that do not fit the new gender are rerolled
+    }
+
+    /// <summary>Set one look by id. Use -1 to reroll it.</summary>
+    public void SetLook(LookSlot slot, int id)
+    {
+        data.SetLook(slot, id);
+        Rebuild();
+    }
+
+    public void SetLook(int hairId, int headId, int bodyId)
+    {
+        data.hairId = hairId; data.headId = headId; data.bodyId = bodyId;
+        Rebuild();
+    }
+
+    public void RandomizeLook() => SetLook(-1, -1, -1);
+
+    /// <summary>Equip by id and fill the magazine.</summary>
+    public void EquipWeapon(int weaponId)
+    {
+        data.weaponId = weaponId;
+        data.ammo = -1;
+        Rebuild();
+    }
+
+    /// <summary>Change ammo without notifying listeners (called on every shot).</summary>
+    public void SetAmmo(int value) => data.ammo = Mathf.Clamp(value, 0, Equipped.magazine);
+
+    /// <summary>Make the data valid, refresh derived values, notify listeners.</summary>
+    private void Rebuild()
+    {
+        GameDatabase db = Database;
+
+        data.hairId = db.ValidLookId(LookSlot.Hair, data.hairId, data.gender);
+        data.headId = db.ValidLookId(LookSlot.Head, data.headId, data.gender);
+        data.bodyId = db.ValidLookId(LookSlot.Body, data.bodyId, data.gender);
+
+        equipped = db.GetWeapon(data.weaponId);
+        data.weaponId = equipped.id;
+        data.ammo = data.ammo < 0 ? equipped.magazine : Mathf.Min(data.ammo, equipped.magazine);
+        weightFactor = Mathf.Max(0.3f, 1f / (1f + equipped.weight * weightSlowPerKg));
+
+        OnDataChanged?.Invoke(this);
+    }
     #endregion
 
     #region Lifecycle
-    public override void InitializeUnit(UnitAttribute attribute)
+    protected override void Wake()
     {
-        base.InitializeUnit(attribute);
-        EndForce(false);
-        if (randomGenderOnInit) SetGender(RNG.GetInt(0, 2) == 0 ? Gender.Male : Gender.Female);
+        base.Wake();
+        ResolveReferences();
     }
 
-    /// <summary>Change gender. PawnVisualization picks a matching Male/Female look on its next refresh.</summary>
-    public void SetGender(Gender value)
+    protected override void Init()
     {
-        if (gender == value) return;
-        gender = value;
-        OnGenderChanged?.Invoke(this);
-    }
-
-    protected override void OnValidate()
-    {
-        base.OnValidate();
-
-        if (!gameObject.TryGetComponent<PawnVisualization>(out visualizer))
-            visualizer = gameObject.AddComponent<PawnVisualization>();
-        if (weapon == null) weapon = GetComponentInChildren<PawnWeapon>(true);
-        visualizer.Activate(this);
+        base.Init();
+        Rebuild();                                     // valid data first...
+        if (visualizer != null) visualizer.Activate(this); // ...then bind visuals and weapon
     }
 
     protected override void Off()
@@ -76,13 +159,31 @@ public class Pawn : GameUnit
         base.Off();
         EndForce(false);
     }
+
+    public override void InitializeUnit(UnitAttribute attribute)
+    {
+        base.InitializeUnit(attribute);
+        EndForce(false);
+        if (randomGenderOnInit) data.gender = RNG.GetInt(0, 2) == 0 ? Gender.Male : Gender.Female;
+        data.ammo = -1; // full magazine on (re)spawn
+        Rebuild();
+    }
+
+    protected override void OnValidate()
+    {
+        base.OnValidate();
+        ResolveReferences();
+    }
+
+    private void ResolveReferences()
+    {
+        if (visualizer == null) visualizer = GetComponent<PawnVisualization>();
+        if (weapon == null) weapon = GetComponentInChildren<PawnWeapon>(true);
+    }
     #endregion
 
-    #region Commands
-    /// <summary>
-    /// Move with pathfinding (A*, smoothing, repath and stuck handling live in GameUnit).
-    /// stoppingDistance = stop this far from the point (interaction range).
-    /// </summary>
+    #region Movement Commands
+    /// <summary>Move with pathfinding (A*, smoothing, repath and stuck handling live in GameUnit).</summary>
     public bool CommandMove(Vector2 world, float stoppingDistance = 0f)
     {
         EndForce(false);
@@ -96,8 +197,8 @@ public class Pawn : GameUnit
     }
 
     /// <summary>
-    /// Move along a direction with NO pathfinding.
-    /// duration &lt;= 0 = until StopMove. ignoreBlocking = walk through blocked cells (still clamped to the map).
+    /// Move along a direction with NO pathfinding. duration &lt;= 0 = until StopMove.
+    /// ignoreBlocking = walk through blocked cells (still clamped to the map).
     /// </summary>
     public void ForceMove(Vector2 direction, float duration = 0f, bool ignoreBlocking = false)
     {
@@ -119,18 +220,16 @@ public class Pawn : GameUnit
     {
         bool wasForce = forceActive;
         EndForce(false);
-        CancelMove();   // clears path + StopUnit
+        CancelMove();
         StopUnit();
         if (wasForce) OnForceMoveEnded?.Invoke(this);
     }
-    #endregion
 
-    #region Helpers
     public float DistanceTo(Vector2 world) => Vector2.Distance(Position, world);
     public bool IsAt(Vector2 world, float tolerance = 0.1f) => IsNear(world, tolerance);
 
-    /// <summary>Current effective speed (attribute speed * terrain multiplier).</summary>
-    public float CurrentSpeed => (float)Attribute.Speed * (forceActive ? forceSpeedMul : SpeedMultiplier);
+    /// <summary>Current effective speed (attribute * terrain * weight).</summary>
+    public float CurrentSpeed => (float)Attribute.Speed * (forceActive ? forceSpeedMul : SpeedMultiplier) * weightFactor;
 
     /// <summary>Turn to face a world point without moving.</summary>
     public void LookAt(Vector2 world)
@@ -139,9 +238,50 @@ public class Pawn : GameUnit
         if (d.sqrMagnitude > 1e-6f) FaceDirection = Resolve(d);
     }
 
+    /// <summary>Turn the body to the weapon aim direction (even while moving).</summary>
+    public void FaceAim()
+    {
+        if (weapon != null) FaceDirection = Resolve(weapon.AimDirection);
+    }
+
+    /// <summary>Turn the body back to the move direction (does nothing when standing still).</summary>
+    public void FaceMoveDirection()
+    {
+        Vector2 d = Direction;
+        if (d.sqrMagnitude > 1e-6f) FaceDirection = Resolve(d);
+    }
+
+    private static FaceDirection Resolve(Vector2 d)
+    {
+        if (Mathf.Abs(d.x) >= Mathf.Abs(d.y)) return d.x >= 0f ? FaceDirection.East : FaceDirection.West;
+        return d.y >= 0f ? FaceDirection.North : FaceDirection.South;
+    }
+    #endregion
+
+    #region Force Move (internals)
+    /// <summary>Raised when a force move ends (duration over, target reached, blocked or StopMove).</summary>
+    public event Action<Pawn> OnForceMoveEnded;
+
+    public bool IsForceMoving => forceActive;
+    /// <summary>True while following a path OR force moving.</summary>
+    public bool HasMoveOrder => forceActive || IsFollowingPath;
+
+    private bool forceActive;
+    private Vector2 forceDir;
+    private bool forceTimed;
+    private float forceTimeLeft;
+    private bool forceIgnoreBlocking;
+    private bool forceHasTarget;
+    private Vector2 forceTarget;
+    private Vector2Int forceCell;
+    private bool forceCellInit;
+    private float forceSpeedMul = 1f;
+
+    protected override float SpeedModifier => weightFactor;
+
     private void BeginForce(Vector2 dir, float duration, bool ignoreBlocking, bool hasTarget, Vector2 target)
     {
-        CancelMove();                 // drop path state
+        CancelMove();
         forceActive = true;
         forceDir = dir;
         forceTimed = duration > 0f;
@@ -166,14 +306,6 @@ public class Pawn : GameUnit
         if (raiseEvent) OnForceMoveEnded?.Invoke(this);
     }
 
-    private static FaceDirection Resolve(Vector2 d)
-    {
-        if (Mathf.Abs(d.x) >= Mathf.Abs(d.y)) return d.x >= 0f ? FaceDirection.East : FaceDirection.West;
-        return d.y >= 0f ? FaceDirection.North : FaceDirection.South;
-    }
-    #endregion
-
-    #region Tick
     protected override void Tick(float deltaTime)
     {
         // A path command issued directly on GameUnit (MoveTo) overrides a running force move.
@@ -203,14 +335,13 @@ public class Pawn : GameUnit
         }
         else forceSpeedMul = 1f;
 
-        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed * forceSpeedMul, forceDir, dt, Active);
+        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed * forceSpeedMul * weightFactor, forceDir, dt, Active);
 
         bool reached = false;
         if (forceHasTarget)
         {
             Vector2 rem = forceTarget - pos;
-            float remDist = rem.magnitude;
-            if (delta.magnitude >= remDist - forceArriveDistance) { delta = rem; reached = true; }
+            if (delta.magnitude >= rem.magnitude - forceArriveDistance) { delta = rem; reached = true; }
         }
 
         Vector2 next = pos + delta;
@@ -245,5 +376,21 @@ public class Pawn : GameUnit
             if (forceTimeLeft <= 0f) EndForce(true);
         }
     }
+    #endregion
+
+    #region Combat (any unit: player, AI, summons)
+    public bool HasWeapon => weapon != null;
+    public bool IsAttacking => weapon != null && weapon.IsAttacking;
+    public bool IsReloading => weapon != null && weapon.IsReloading;
+    public bool CanAttack => weapon != null && weapon.CanAttack;
+
+    public bool TryAttack(in AttackParams p = default) => weapon != null && weapon.TryAttack(p);
+    public bool TryAttackDir(Vector2 dir, in AttackParams p = default) => weapon != null && weapon.TryAttackDir(dir, p);
+    public bool TryAttackAt(Vector2 world, in AttackParams p = default) => weapon != null && weapon.TryAttackAt(world, p);
+    public bool TryAttackUnit(GameUnit target, in AttackParams p = default) => target != null && TryAttackAt(target.Position, p);
+    public bool Reload() => weapon != null && weapon.Reload();
+
+    public void AimAt(Vector2 world) { if (weapon != null) weapon.AimAt(world); }
+    public void ClearAim() { if (weapon != null) weapon.ClearAim(); }
     #endregion
 }

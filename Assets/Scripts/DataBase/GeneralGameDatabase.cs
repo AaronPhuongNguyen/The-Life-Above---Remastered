@@ -1,192 +1,33 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
+#region Enums & interfaces
 public enum Gender : byte { Male, Female }
+public enum LookGender : byte { Any, Male, Female }
+public enum LookSlot : byte { Hair, Head, Body }
+public enum WeaponKind : byte { Melee, Ranged }
 
-[CreateAssetMenu(fileName = "GeneralDatabase", menuName = "Database/General")]
-public class GameDatabase : ScriptableObject
-{
-    // To add a new category (Clothes, Armour, Accessories...):
-    //   - add a GenderedPackageList field (Male / Female folders) or a PackageList / PackageList_Single field (unisex)
-    //   - tag it with [SpriteFolder("FolderName")]
-    // The editor tool "Tools/Pawn/Sprite Assigner" picks it up automatically.
-    //
-    // Folders:  Assets/Sprites/Pawn/Hair/Male, Hair/Female, Head/Male, Head/Female, Body/Male, Body/Female, Gun
-    [Header("Body (Male / Female)")]
-    [SpriteFolder("Hair")] public GenderedPackageList HairSprite = new GenderedPackageList();
-    [SpriteFolder("Head")] public GenderedPackageList HeadSprite = new GenderedPackageList();
-    [SpriteFolder("Body")] public GenderedPackageList BodySprite = new GenderedPackageList();
+public interface IHasId { int Id { get; } }
+#endregion
 
-    [Header("Weapon (unisex)")]
-    [SpriteFolder("Gun")] public PackageList_Single Guns = new PackageList_Single();
-
-    #region Helpers
-    /// <summary>Runtime copy so changes never touch the asset on disk. Sprites are shared references.</summary>
-    public GameDatabase Clone() => Instantiate(this);
-
-    // ---- random picks (seeded through RNG) ----
-    public SpritePackage_Multiple GetRandomHair(Gender g, out int index) => HairSprite.GetRandom(g, out index);
-    public SpritePackage_Multiple GetRandomHead(Gender g, out int index) => HeadSprite.GetRandom(g, out index);
-    public SpritePackage_Multiple GetRandomBody(Gender g, out int index) => BodySprite.GetRandom(g, out index);
-    public SpritePackage_Single GetRandomGun(out int index) => Guns.GetRandom(out index);
-
-    public SpritePackage_Multiple GetRandomHair(Gender g) => GetRandomHair(g, out _);
-    public SpritePackage_Multiple GetRandomHead(Gender g) => GetRandomHead(g, out _);
-    public SpritePackage_Multiple GetRandomBody(Gender g) => GetRandomBody(g, out _);
-    public SpritePackage_Single GetRandomGun() => GetRandomGun(out _);
-
-    // ---- by index (index is inside the list of that gender) ----
-    public SpritePackage_Multiple GetHair(Gender g, int index) => HairSprite.Get(g, index);
-    public SpritePackage_Multiple GetHead(Gender g, int index) => HeadSprite.Get(g, index);
-    public SpritePackage_Multiple GetBody(Gender g, int index) => BodySprite.Get(g, index);
-    public SpritePackage_Single GetGun(int index) => Guns.Get(index);
-
-    // ---- precise lookup by sprite name (matches any facing of the package) ----
-    public int FindHairIndex(Gender g, string spriteName) => HairSprite.FindIndex(g, spriteName);
-    public int FindHeadIndex(Gender g, string spriteName) => HeadSprite.FindIndex(g, spriteName);
-    public int FindBodyIndex(Gender g, string spriteName) => BodySprite.FindIndex(g, spriteName);
-    public int FindGunIndex(string spriteName) => Guns.FindIndex(spriteName);
-
-    public SpritePackage_Multiple FindHair(Gender g, string spriteName) => HairSprite.Find(g, spriteName);
-    public SpritePackage_Multiple FindHead(Gender g, string spriteName) => HeadSprite.Find(g, spriteName);
-    public SpritePackage_Multiple FindBody(Gender g, string spriteName) => BodySprite.Find(g, spriteName);
-    public SpritePackage_Single FindGun(string spriteName) => Guns.Find(spriteName);
-    #endregion
-}
-
-#region List
-/// <summary>A category that exists in a Male and a Female version (Hair, Head, Body, later Clothes...).</summary>
+#region Definitions
+/// <summary>One cosmetic variant (a hair, a head or a body). Gender decides who may use it.</summary>
 [Serializable]
-public class GenderedPackageList
+public class LookDef : IHasId
 {
-    public PackageList Male = new PackageList();
-    public PackageList Female = new PackageList();
+    public int id;
+    [Tooltip("Written by the Sprite Assigner to keep the id stable. Do not edit.")]
+    public string key;
+    public LookGender gender = LookGender.Any;
+    public Sprite East, North, South;
 
-    public PackageList ForGender(Gender g) => g == Gender.Female ? Female : Male;
+    public int Id => id;
 
-    public int Count(Gender g) => ForGender(g).Count;
-    public bool IsValid(Gender g, int index) => ForGender(g).IsValid(index);
+    public bool Fits(Gender g) =>
+        gender == LookGender.Any || (g == Gender.Male ? gender == LookGender.Male : gender == LookGender.Female);
 
-    public SpritePackage_Multiple Get(Gender g, int index) => ForGender(g).Get(index);
-    public SpritePackage_Multiple GetWrapped(Gender g, int index) => ForGender(g).GetWrapped(index);
-
-    public SpritePackage_Multiple GetRandom(Gender g, out int index) => ForGender(g).GetRandom(out index);
-    public SpritePackage_Multiple GetRandom(Gender g) => ForGender(g).GetRandom();
-
-    public int FindIndex(Gender g, string spriteName) => ForGender(g).FindIndex(spriteName);
-    public SpritePackage_Multiple Find(Gender g, string spriteName) => ForGender(g).Find(spriteName);
-
-    /// <summary>Search both lists. Returns false if the sprite name is in neither.</summary>
-    public bool TryFind(string spriteName, out Gender gender, out int index)
-    {
-        index = Male.FindIndex(spriteName);
-        if (index >= 0) { gender = Gender.Male; return true; }
-        index = Female.FindIndex(spriteName);
-        gender = Gender.Female;
-        return index >= 0;
-    }
-}
-
-[Serializable]
-public class PackageList
-{
-    public SpritePackage_Multiple[] package;
-
-    public int Count => package == null ? 0 : package.Length;
-    public bool IsValid(int index) => index >= 0 && index < Count;
-
-    public SpritePackage_Multiple Get(int index) => IsValid(index) ? package[index] : null;
-    public bool TryGet(int index, out SpritePackage_Multiple result)
-    {
-        result = Get(index);
-        return result != null;
-    }
-
-    /// <summary>Wraps the index around the list (handy for "next/previous" buttons).</summary>
-    public SpritePackage_Multiple GetWrapped(int index)
-    {
-        int n = Count;
-        if (n == 0) return null;
-        return package[((index % n) + n) % n];
-    }
-
-    public SpritePackage_Multiple GetRandom(out int index)
-    {
-        int n = Count;
-        index = n == 0 ? -1 : (n == 1 ? 0 : RNG.GetInt(0, n));
-        return index < 0 ? null : package[index];
-    }
-    public SpritePackage_Multiple GetRandom() => GetRandom(out _);
-
-    public int FindIndex(Predicate<SpritePackage_Multiple> match)
-    {
-        for (int i = 0; i < Count; i++)
-            if (package[i] != null && match(package[i])) return i;
-        return -1;
-    }
-
-    /// <summary>Index of the package having a sprite with this exact name (East, North or South). -1 if none.</summary>
-    public int FindIndex(string spriteName) => FindIndex(p => p.HasSprite(spriteName));
-
-    public SpritePackage_Multiple Find(string spriteName) => Get(FindIndex(spriteName));
-}
-
-[Serializable]
-public class PackageList_Single
-{
-    public SpritePackage_Single[] package;
-
-    public int Count => package == null ? 0 : package.Length;
-    public bool IsValid(int index) => index >= 0 && index < Count;
-
-    public SpritePackage_Single Get(int index) => IsValid(index) ? package[index] : null;
-    public bool TryGet(int index, out SpritePackage_Single result)
-    {
-        result = Get(index);
-        return result != null;
-    }
-
-    public SpritePackage_Single GetWrapped(int index)
-    {
-        int n = Count;
-        if (n == 0) return null;
-        return package[((index % n) + n) % n];
-    }
-
-    public SpritePackage_Single GetRandom(out int index)
-    {
-        int n = Count;
-        index = n == 0 ? -1 : (n == 1 ? 0 : RNG.GetInt(0, n));
-        return index < 0 ? null : package[index];
-    }
-    public SpritePackage_Single GetRandom() => GetRandom(out _);
-
-    public int FindIndex(string spriteName)
-    {
-        for (int i = 0; i < Count; i++)
-            if (package[i] != null && package[i].sprite != null && package[i].sprite.name == spriteName) return i;
-        return -1;
-    }
-
-    public SpritePackage_Single Find(string spriteName) => Get(FindIndex(spriteName));
-}
-
-[Serializable]
-public class SpritePackage_Multiple
-{
-    public Sprite East;
-    public Sprite North;
-    public Sprite South;
-
-    public bool HasSprite(string spriteName) =>
-        (East != null && East.name == spriteName) ||
-        (North != null && North.name == spriteName) ||
-        (South != null && South.name == spriteName);
-
-    /// <summary>
-    /// Sprite for a facing. West has no art of its own: it is East mirrored (flipX = true).
-    /// Falls back to East when the requested sprite is missing.
-    /// </summary>
+    /// <summary>West has no art of its own: it is East mirrored. Falls back to East when a sprite is missing.</summary>
     public Sprite GetSprite(FaceDirection face, out bool flipX)
     {
         flipX = false;
@@ -203,17 +44,285 @@ public class SpritePackage_Multiple
     }
 }
 
+/// <summary>Pure data, no sprite. Both guns and melee weapons point at one of these for their damage.</summary>
 [Serializable]
-public class SpritePackage_Single
+public class BulletDef : IHasId
 {
+    public int id;
+    public string name = "5.56x45mm";
+    [Min(0f)] public float baseDamage = 20f;
+    [Tooltip("0..1. Share of the target's defense that is ignored.")]
+    [Range(0f, 1f)] public float armourPenetration = 0.25f;
+    [Tooltip("Extra targets after the first one. 0 = hits one target.")]
+    [Min(0)] public int pierceMaxTargets = 0;
+    [Tooltip("Share of damage lost after each target pierced (ranged only).")]
+    [Range(0f, 1f)] public float pierceFalloff = 0.2f;
+    [Tooltip("Thickness of the shot. 0 = thin ray.")]
+    [Min(0f)] public float width = 0.05f;
+
+    public int Id => id;
+    public int MaxTargets => 1 + pierceMaxTargets;
+
+    public static BulletDef Create556() => new BulletDef { id = GameDatabase.Bullet556Id, name = "5.56x45mm" };
+    public static BulletDef CreateFistHit() => new BulletDef
+    {
+        id = GameDatabase.BulletFistId,
+        name = "Fist Hit",
+        baseDamage = 5f,
+        armourPenetration = 0f,
+        pierceMaxTargets = 2,
+        pierceFalloff = 0f,
+        width = 0f
+    };
+}
+
+/// <summary>Melee and ranged share this class. Stats a weapon does not need are simply 0.</summary>
+[Serializable]
+public class WeaponDef : IHasId
+{
+    public int id;
+    public string name = "Weapon";
+    public WeaponKind kind = WeaponKind.Ranged;
     public Sprite sprite;
+
+    [Header("Shared")]
+    [Tooltip("Attacks per second (multiplied by the unit's AttackSpeed attribute).")]
+    [Min(0f)] public float fireRate = 1f;
+    [Tooltip("World units (multiplied by the unit's AttackRange attribute).")]
+    [Min(0f)] public float range = 1f;
+    [Tooltip("Carried weight. Slows the unit down.")]
+    [Min(0f)] public float weight = 0f;
+    [Tooltip("Share of the unit's ATK added to the bullet damage.")]
+    [Min(0f)] public float unitAtkScale = 0f;
+    public int bulletId = GameDatabase.Bullet556Id;
+
+    [Header("Ranged only")]
+    [Tooltip("Rounds per magazine. 0 = no ammo needed (melee).")]
+    [Min(0)] public int magazine = 30;
+    [Tooltip("Base reload time in seconds, divided by Manipulation.")]
+    [Min(0f)] public float reloadTime = 2.5f;
+    [Tooltip("Lower = bullets fly more chaotically around the aim. Never perfect at runtime.")]
+    [Range(0f, 1f)] public float accuracy = 0.8f;
+    [Tooltip("Lower = the aim spreads faster while firing. Never zero, never absolute.")]
+    [Range(0f, 1f)] public float stability = 0.5f;
+    [Tooltip("Speed of handling actions (reload...). 1 = normal.")]
+    [Min(0f)] public float manipulation = 1f;
+
+    [Header("Melee only")]
+    [Tooltip("Half angle of the swing cone, in degrees.")]
+    [Range(0f, 180f)] public float arc = 0f;
+
+    public int Id => id;
+    public bool IsRanged => kind == WeaponKind.Ranged;
+    public bool UsesAmmo => magazine > 0;
+
+    public static WeaponDef CreateFist() => new WeaponDef
+    {
+        id = GameDatabase.FistId,
+        name = "Fist",
+        kind = WeaponKind.Melee,
+        fireRate = 2f,
+        range = 1.2f,
+        arc = 60f,
+        unitAtkScale = 1f,
+        bulletId = GameDatabase.BulletFistId,
+        magazine = 0,
+        reloadTime = 0f,
+        accuracy = 0f,
+        stability = 0f,
+        manipulation = 0f,
+        weight = 0f
+    };
+
+    public static WeaponDef CreateAK47() => new WeaponDef
+    {
+        id = GameDatabase.AK47Id,
+        name = "AK-47",
+        kind = WeaponKind.Ranged,
+        fireRate = 10f,
+        range = 25f,
+        magazine = 30,
+        reloadTime = 2.5f,
+        accuracy = 0.8f,
+        stability = 0.55f,
+        manipulation = 1f,
+        weight = 4.3f,
+        unitAtkScale = 0f,
+        bulletId = GameDatabase.Bullet556Id
+    };
 }
 #endregion
 
-/// <summary>Tells the editor tool which sub-folder of the sprite root fills this database field.</summary>
-[AttributeUsage(AttributeTargets.Field)]
-public class SpriteFolderAttribute : Attribute
+/// <summary>
+/// Read-only content database. Everything is looked up by id; a save file only needs those ids.
+/// Add a new category = add one List field + one lookup. Nothing else changes.
+/// </summary>
+[CreateAssetMenu(fileName = ResourceName, menuName = "Database/General")]
+public class GameDatabase : ScriptableObject
 {
-    public readonly string Folder;
-    public SpriteFolderAttribute(string folder) { Folder = folder; }
+    public const string ResourceName = "GeneralDatabase";
+
+    // built-in ids (always present)
+    public const int FistId = 0, AK47Id = 1;
+    public const int Bullet556Id = 0, BulletFistId = 1;
+
+    [Header("Pawn looks (Gender Any / Male / Female)")]
+    public List<LookDef> Hair = new List<LookDef>();
+    public List<LookDef> Head = new List<LookDef>();
+    public List<LookDef> Body = new List<LookDef>();
+
+    [Header("Combat")]
+    public List<WeaponDef> Weapons = new List<WeaponDef>();
+    public List<BulletDef> Bullets = new List<BulletDef>();
+
+    #region Access
+    private static GameDatabase main;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatic() => main = null;
+
+    /// <summary>The shared database (Resources/GeneralDatabase). Never modify it at runtime.</summary>
+    public static GameDatabase Main
+    {
+        get
+        {
+            if (main != null) return main;
+            main = Resources.Load<GameDatabase>(ResourceName);
+            if (main == null)
+            {
+                Debug.LogWarning($"[GameDatabase] '{ResourceName}' not found in a Resources folder. Using built-in defaults.");
+                main = CreateInstance<GameDatabase>();
+                main.EnsureDefaults();
+            }
+            return main;
+        }
+    }
+
+    private void OnEnable() { EnsureDefaults(); InvalidateCache(); }
+    private void OnValidate() { EnsureDefaults(); InvalidateCache(); }
+    #endregion
+
+    #region Lookup
+    private sealed class IdIndex<T> where T : class, IHasId
+    {
+        private readonly Dictionary<int, T> map = new Dictionary<int, T>();
+        private bool built;
+
+        public T Get(List<T> list, int id)
+        {
+            if (!built) Build(list);
+            return map.TryGetValue(id, out T v) ? v : null;
+        }
+
+        public void Invalidate() => built = false;
+
+        private void Build(List<T> list)
+        {
+            map.Clear();
+            if (list != null)
+                for (int i = 0; i < list.Count; i++)
+                    if (list[i] != null) map[list[i].Id] = list[i];
+            built = true;
+        }
+    }
+
+    private readonly IdIndex<LookDef> hairIdx = new IdIndex<LookDef>();
+    private readonly IdIndex<LookDef> headIdx = new IdIndex<LookDef>();
+    private readonly IdIndex<LookDef> bodyIdx = new IdIndex<LookDef>();
+    private readonly IdIndex<WeaponDef> weaponIdx = new IdIndex<WeaponDef>();
+    private readonly IdIndex<BulletDef> bulletIdx = new IdIndex<BulletDef>();
+
+    /// <summary>Call after editing a list from code (the Sprite Assigner does).</summary>
+    public void InvalidateCache()
+    {
+        hairIdx.Invalidate(); headIdx.Invalidate(); bodyIdx.Invalidate();
+        weaponIdx.Invalidate(); bulletIdx.Invalidate();
+    }
+
+    public List<LookDef> GetList(LookSlot slot)
+    {
+        switch (slot)
+        {
+            case LookSlot.Hair: return Hair;
+            case LookSlot.Head: return Head;
+            default: return Body;
+        }
+    }
+
+    private IdIndex<LookDef> IndexOf(LookSlot slot)
+    {
+        switch (slot)
+        {
+            case LookSlot.Hair: return hairIdx;
+            case LookSlot.Head: return headIdx;
+            default: return bodyIdx;
+        }
+    }
+
+    /// <summary>Null when the id does not exist.</summary>
+    public LookDef GetLook(LookSlot slot, int id) => IndexOf(slot).Get(GetList(slot), id);
+
+    /// <summary>Unknown ids fall back to Fist, so a unit is never weaponless.</summary>
+    public WeaponDef GetWeapon(int id) => weaponIdx.Get(Weapons, id) ?? weaponIdx.Get(Weapons, FistId);
+
+    /// <summary>Unknown ids fall back to 5.56.</summary>
+    public BulletDef GetBullet(int id) => bulletIdx.Get(Bullets, id) ?? bulletIdx.Get(Bullets, Bullet556Id);
+    #endregion
+
+    #region Random / validation (seeded through RNG)
+    /// <summary>Random look id that fits the gender. -1 when the list has none.</summary>
+    public int RandomLookId(LookSlot slot, Gender gender)
+    {
+        List<LookDef> list = GetList(slot);
+        int count = 0;
+        for (int i = 0; i < list.Count; i++)
+            if (list[i] != null && list[i].Fits(gender)) count++;
+        if (count == 0) return -1;
+
+        int pick = count == 1 ? 0 : RNG.GetInt(0, count);
+        for (int i = 0; i < list.Count; i++)
+            if (list[i] != null && list[i].Fits(gender) && pick-- == 0) return list[i].id;
+        return -1;
+    }
+
+    /// <summary>Keeps the id when it exists and fits the gender, otherwise picks a random fitting one.</summary>
+    public int ValidLookId(LookSlot slot, int id, Gender gender)
+    {
+        LookDef d = GetLook(slot, id);
+        return d != null && d.Fits(gender) ? id : RandomLookId(slot, gender);
+    }
+    #endregion
+
+    #region Defaults
+    /// <summary>Adds Fist, AK-47, 5.56 and Fist Hit when missing. Assign the AK-47 sprite in the Inspector.</summary>
+    public void EnsureDefaults()
+    {
+        if (Hair == null) Hair = new List<LookDef>();
+        if (Head == null) Head = new List<LookDef>();
+        if (Body == null) Body = new List<LookDef>();
+        if (Weapons == null) Weapons = new List<WeaponDef>();
+        if (Bullets == null) Bullets = new List<BulletDef>();
+
+        if (!Has(Bullets, Bullet556Id)) Bullets.Add(BulletDef.Create556());
+        if (!Has(Bullets, BulletFistId)) Bullets.Add(BulletDef.CreateFistHit());
+        if (!Has(Weapons, FistId)) Weapons.Add(WeaponDef.CreateFist());
+        if (!Has(Weapons, AK47Id)) Weapons.Add(WeaponDef.CreateAK47());
+    }
+
+    private static bool Has<T>(List<T> list, int id) where T : class, IHasId
+    {
+        for (int i = 0; i < list.Count; i++)
+            if (list[i] != null && list[i].Id == id) return true;
+        return false;
+    }
+
+    /// <summary>Next free id of a list (max + 1).</summary>
+    public static int NextId(List<LookDef> list)
+    {
+        int max = -1;
+        for (int i = 0; i < list.Count; i++)
+            if (list[i] != null && list[i].id > max) max = list[i].id;
+        return max + 1;
+    }
+    #endregion
 }

@@ -1,158 +1,83 @@
 using UnityEngine;
 
-[RequireComponent(typeof(Pawn))]
+/// <summary>Draws what the Pawn's data says: hair / head / body by facing, and the weapon sprite.</summary>
 public class PawnVisualization : TickBehaviour
 {
-    [Header("Properties")]
+    [Header("References")]
     public Pawn owner;
-    public GameDatabase data;
-    [SerializeField] private string DatabaseName = "GeneralDatabase";
-
-    [Header("Renderer")]
     public SpriteRenderer Hair;
     public SpriteRenderer Head;
     public SpriteRenderer Body;
-    [Tooltip("Optional. Owns the weapon root / renderer, rotation and sorting. This script only gives it the gun sprite.")]
+    [Tooltip("Optional. Owns the weapon root, rotation, sorting and attacks. This script only gives it the sprite.")]
     public PawnWeapon Weapon;
 
-    [Header("Look (index into the list of the pawn's gender, -1 = pick randomly on Activate)")]
-    [SerializeField] private int hairIndex = -1;
-    [SerializeField] private int headIndex = -1;
-    [SerializeField] private int bodyIndex = -1;
-    [SerializeField] private int gunIndex = -1;
-
-    [Header("Refresh")]
-    [Tooltip("Seconds between facing / gender checks. Sprites only change when something actually changed.")]
-    [SerializeField, Min(0f)] private float refreshInterval = 0.1f;
-
-    private float timer;
     private bool hasFace;
     private FaceDirection lastFace;
-    private bool hasGender;
-    private Gender lastGender;
-
-    public int HairIndex => hairIndex;
-    public int HeadIndex => headIndex;
-    public int BodyIndex => bodyIndex;
-    public int GunIndex => gunIndex;
-
-    private Gender CurrentGender => owner != null ? owner.Gender : Gender.Male;
 
     #region Public API
-    /// <summary>
-    /// Set owner and initialize the pawn's visualization.
-    /// </summary>
+    /// <summary>Bind to the pawn and draw. Called by Pawn.Init.</summary>
     public virtual void Activate(Pawn pawn)
     {
-        //Pawn will call this when pawn is generated.
+        Unbind();
         if (pawn != null) owner = pawn;
+        if (owner == null) return;
+        if (Weapon == null) Weapon = owner.weapon;
 
-        if (data == null)
-        {
-            GameDatabase loaded = owner != null && owner.Database != null ? owner.Database : Resources.Load<GameDatabase>(DatabaseName);
-            if (loaded == null)
-            {
-                Debug.LogError($"[PawnVisualization] Database '{DatabaseName}' not found in a Resources folder.", this);
-                return;
-            }
-            data = loaded.Clone();
-        }
-
-        hasGender = owner != null;
-        lastGender = CurrentGender;
-
-        if (hairIndex < 0 || headIndex < 0 || bodyIndex < 0) RollBody(lastGender);
-        if (gunIndex < 0) data.GetRandomGun(out gunIndex);
-
+        Bind();
         Refresh(true);
-        if (Weapon != null) Weapon.Activate(owner); // after Refresh so the gun sprite is already set
+        if (Weapon != null) Weapon.Activate(owner); // after Refresh so the sprite is already set
     }
 
-    /// <summary>Pick a random hair / head / body of the pawn's gender (and a gun when includeGun).</summary>
-    public void RandomizeLook(bool includeGun = true)
-    {
-        if (data == null) return;
-        RollBody(CurrentGender);
-        if (includeGun || gunIndex < 0) data.GetRandomGun(out gunIndex);
-        Refresh(true);
-    }
-
-    public void SetLook(int hair, int head, int body, int gun = -1)
-    {
-        hairIndex = hair; headIndex = head; bodyIndex = body;
-        if (gun >= -1) gunIndex = gun;
-        Refresh(true);
-    }
-
-    public void SetHair(int index) { hairIndex = index; Refresh(true); }
-    public void SetHead(int index) { headIndex = index; Refresh(true); }
-    public void SetBody(int index) { bodyIndex = index; Refresh(true); }
-    public void SetGun(int index) { gunIndex = index; Refresh(true); }
-
-    public void ShowWeapon(bool show)
-    {
-        if (Weapon != null) Weapon.Show(show);
-    }
-
-    /// <summary>
-    /// Re-apply sprites. force = ignore the "nothing changed" shortcut.
-    /// If the pawn's gender changed since the last refresh, a new random hair/head/body of that gender is picked
-    /// (the old indices belong to the other list).
-    /// </summary>
+    /// <summary>Re-apply sprites. force = ignore the "facing did not change" shortcut.</summary>
     public void Refresh(bool force = false)
     {
-        if (data == null || owner == null) return;
-
-        Gender gender = owner.Gender;
-        if (!hasGender) { hasGender = true; lastGender = gender; }
-        else if (gender != lastGender)
-        {
-            lastGender = gender;
-            RollBody(gender);
-            force = true;
-        }
+        if (owner == null) return;
 
         FaceDirection face = owner.Facing;
         if (!force && hasFace && face == lastFace) return;
         hasFace = true;
         lastFace = face;
 
-        Apply(Hair, data.GetHair(gender, hairIndex), face);
-        Apply(Head, data.GetHead(gender, headIndex), face);
-        Apply(Body, data.GetBody(gender, bodyIndex), face);
+        GameDatabase db = owner.Database;
+        Apply(Hair, db.GetLook(LookSlot.Hair, owner.HairId), face);
+        Apply(Head, db.GetLook(LookSlot.Head, owner.HeadId), face);
+        Apply(Body, db.GetLook(LookSlot.Body, owner.BodyId), face);
 
-        if (Weapon != null)
-        {
-            var gun = data.GetGun(gunIndex);
-            Weapon.SetSprite(gun != null ? gun.sprite : null);
-        }
+        if (Weapon != null) Weapon.SetSprite(owner.Equipped.sprite);
     }
 
-    private void RollBody(Gender gender)
+    public void ShowWeapon(bool show)
     {
-        data.GetRandomHair(gender, out hairIndex);
-        data.GetRandomHead(gender, out headIndex);
-        data.GetRandomBody(gender, out bodyIndex);
-    }
-
-    private static void Apply(SpriteRenderer r, SpritePackage_Multiple package, FaceDirection face)
-    {
-        if (r == null) return;
-        if (package == null) { r.sprite = null; return; }
-        r.sprite = package.GetSprite(face, out bool flip);
-        r.flipX = flip; // West = mirrored East
+        if (Weapon != null) Weapon.Show(show);
     }
     #endregion
 
-    #region Main thread
-    /// Depends on the pawn's FaceDirection (and Gender) to assign the related sprite into each renderer.
-    /// South/East/North use their own sprite, West = mirrored East.
-    protected override void Tick(float deltaTime)
+    #region Internals
+    private static void Apply(SpriteRenderer r, LookDef look, FaceDirection face)
     {
-        timer += deltaTime;
-        if (timer < refreshInterval) return;
-        timer = 0f;
-        Refresh();
+        if (r == null) return;
+        if (look == null) { r.sprite = null; return; }
+        r.sprite = look.GetSprite(face, out bool flip);
+        r.flipX = flip; // West = mirrored East
     }
+
+    private void Bind() { owner.OnDataChanged += HandleDataChanged; }
+    private void Unbind() { if (owner != null) owner.OnDataChanged -= HandleDataChanged; }
+    private void HandleDataChanged(Pawn p) => Refresh(true);
+
+    protected override void On()
+    {
+        base.On();
+        if (owner != null) { Unbind(); Bind(); } // re-enable after Off
+    }
+
+    protected override void Off()
+    {
+        base.Off();
+        Unbind();
+    }
+
+    // Comparing one enum per frame is cheaper than a timer. Sprites only change when the facing did.
+    protected override void Tick(float deltaTime) => Refresh();
     #endregion
 }

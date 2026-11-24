@@ -58,6 +58,7 @@ public class GameUnit : TickBehaviour, IUnit
 
     public event Action<GameUnit> OnArrived;
     public event Action<GameUnit> OnPathFailed;
+    protected virtual float SpeedModifier => 1f;
 
     //cache
     private Transform cachedTransform;
@@ -177,7 +178,7 @@ public class GameUnit : TickBehaviour, IUnit
             return;
         }
 
-        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed, direction, deltaTime, active);
+        Vector2 delta = Calculation.CalculateMovement((float)Attribute.Speed * SpeedModifier, direction, deltaTime, active);
         isMoving = delta.x != 0f || delta.y != 0f;
         if (!isMoving) return;
 
@@ -434,7 +435,7 @@ public class GameUnit : TickBehaviour, IUnit
         if (last && arrivalSlowRadius > 0f)
             scale = Mathf.Clamp((dist - stopDistance) / arrivalSlowRadius, minArrivalSpeed, 1f);
 
-        float speed = (float)Attribute.Speed * speedMultiplier * scale;
+        float speed = (float)Attribute.Speed * speedMultiplier * SpeedModifier * scale;
         Vector2 delta = Calculation.CalculateMovement(speed, dir, deltaTime, active);
 
         float maxStep = last ? Mathf.Max(0f, dist - stopDistance) : dist;
