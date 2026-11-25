@@ -8,22 +8,20 @@ public delegate void HealHandler(ref HealResult result);
 public struct DamageResult
 {
     // (Base + Flat) * Total * Mitigation
-    public float Damage => (Base + Bonus_Flat) * Bonus_Total * Mitigation;
+    public float Damage => (Base + Bonus_Flat) * Bonus_Total;
     public float Base;
     public float Bonus_Flat;
     public float Bonus_Total;      // multiply into it (*=) so handlers stay order-independent
-    public float Mitigation;       // defense multiplier, set by Calculation
 
     public readonly UnitAttribute Attacker;
     public readonly UnitAttribute Victim;
 
     public DamageResult(float damage, UnitAttribute a, UnitAttribute v,
-                        float flatBonus = 0f, float totalBonus = 1f, float mitigation = 1f)
+                        float flatBonus = 0f, float totalBonus = 1f)
     {
         Base = damage;
         Bonus_Flat = flatBonus;
         Bonus_Total = totalBonus;
-        Mitigation = mitigation;
         Attacker = a;
         Victim = v;
     }
@@ -88,7 +86,6 @@ public static class Attack
         if (attacker == null || victim == null || !victim.IsAlive) return false;
 
         result = Calculation.CalculateDamage(damage, attacker, victim);
-        if (ArmourPenetration > 0f) result.Mitigation = Mathf.Lerp(result.Mitigation, 1f, ArmourPenetration);
         if (result.Damage <= 0f) return false;
 
         attacker.OnDealDamage?.Invoke(ref result);    // attacker side: crit, lifesteal, berserk...

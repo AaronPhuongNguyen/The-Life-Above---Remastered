@@ -17,7 +17,6 @@ public struct AttackParams
 public struct AttackData
 {
     public WeaponDef weapon;
-    public BulletDef bullet;
     public UnitAttribute attacker;
     public Vector2 origin, dir;
     public float damage, range, armourPen, width, falloff, halfAngle;
@@ -235,8 +234,7 @@ public class PawnWeapon : TickBehaviour
         float rate = w.fireRate * attr.AttackSpeed;
         if (rate <= 0f) return false;
 
-        BulletDef bullet = owner.Database.GetBullet(w.bulletId);
-        AttackData d = Build(w, bullet, attr, dirOverride, p);
+        AttackData d = Build(w, attr, dirOverride, p);
         if (d.damage <= 0f || d.range <= 0f) return false;
 
         nextShotTime = Time.time + 1f / rate;
@@ -250,7 +248,7 @@ public class PawnWeapon : TickBehaviour
         return true;
     }
 
-    private AttackData Build(WeaponDef w, BulletDef bullet, UnitAttribute attr, Vector2? dirOverride, in AttackParams p)
+    private AttackData Build(WeaponDef w, UnitAttribute attr, Vector2? dirOverride, in AttackParams p)
     {
         Vector2 dir = dirOverride ?? p.direction ?? AimDirection;
         float sqr = dir.sqrMagnitude;
@@ -260,17 +258,16 @@ public class PawnWeapon : TickBehaviour
         return new AttackData
         {
             weapon = w,
-            bullet = bullet,
             attacker = attr,
             origin = w.IsRanged ? MuzzlePosition : owner.Position,
             dir = dir,
-            damage = p.damage ?? ResolveDamage(w, bullet, attr),
+            damage = p.damage ?? ResolveDamage(w, attr),
             range = p.range ?? ResolveRange(w, attr),
-            armourPen = bullet.armourPenetration,
-            width = bullet.width,
-            falloff = bullet.pierceFalloff,
+            armourPen = w.armourPenetration,
+            width = w.width,
+            falloff = w.pierceFalloff,
             halfAngle = w.arc,
-            maxTargets = p.maxTargets ?? bullet.MaxTargets,
+            maxTargets = p.maxTargets ?? w.MaxTargets,
             mask = p.mask ?? owner.TargetMask,
             results = p.results
         };
@@ -281,7 +278,7 @@ public class PawnWeapon : TickBehaviour
         Root != null ? (Vector2)Root.position : owner.Position;
 
     // ---- extension points: override in a subclass for special weapons / attacks ----
-    protected virtual float ResolveDamage(WeaponDef w, BulletDef b, UnitAttribute a) => b.baseDamage + a.ATK * w.unitAtkScale;
+    protected virtual float ResolveDamage(WeaponDef w, UnitAttribute a) => w.baseDamage + a.ATK * w.unitAtkScale;
     protected virtual float ResolveRange(WeaponDef w, UnitAttribute a) => w.range * a.AttackRange;
     protected virtual float ResolveReloadTime(WeaponDef w, UnitAttribute a) => w.reloadTime / Mathf.Max(0.1f, w.manipulation);
 
