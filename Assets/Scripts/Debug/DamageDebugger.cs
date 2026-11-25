@@ -53,7 +53,7 @@ public class UnitDebug : MonoBehaviour
     {
         bool hit = Attack.Apply(Unit, Unit, DamageAmount, out DamageResult r);
         Log = hit
-            ? $"DAMAGE {r.Damage:0.#} (base {r.Base:0.#} x{r.Bonus_Total:0.##} x def {r.Mitigation:0.##}) -> HP {Unit.HP_Current:0.#}/{Unit.HP_Max:0.#}"
+            ? $"DAMAGE {r.Damage:0.#} (base {r.Base:0.#} x{r.Bonus_Total:0.##}) -> HP {Unit.HP_Current:0.#}/{Unit.HP_Max:0.#}"
             : "DAMAGE: no effect (dead or blocked)";
         Debug.Log(Log, this);
     }

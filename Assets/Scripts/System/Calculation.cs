@@ -36,7 +36,7 @@ public static class Calculation
         if (originalDamage <= 0f || attacker == null || victim == null)
             return default;                                   // Damage == 0
 
-        return new DamageResult(originalDamage, attacker, victim, mitigation: DamageMultiplier(victim.Defense));
+        return new DamageResult(originalDamage, attacker, victim);
     }
 
     public static HealResult CalculateHeal(float amount, UnitAttribute source, UnitAttribute target)
